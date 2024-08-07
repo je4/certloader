@@ -4,7 +4,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"emperror.dev/errors"
-	"github.com/je4/trustutil/v2/pkg/config"
 	"github.com/je4/trustutil/v2/pkg/tlsutil"
 	configutil "github.com/je4/utils/v2/pkg/config"
 	"github.com/je4/utils/v2/pkg/zLogger"
@@ -15,13 +14,38 @@ import (
 	"time"
 )
 
+type MiniVaultConfig struct {
+	BaseURL       string               `json:"baseurl,omitempty" toml:"baseurl"`
+	ParentToken   string               `json:"parenttoken,omitempty" toml:"parenttoken"`
+	TokenType     string               `json:"tokentype,omitempty" toml:"tokentype"`
+	TokenPolicies []string             `json:"tokenpolicies,omitempty" toml:"tokenpolicies"`
+	TokenInterval configutil.Duration  `json:"tokeninterval,omitempty" toml:"tokeninterval"`
+	CertType      string               `json:"certtype,omitempty" toml:"certtype"`
+	URIs          []string             `json:"uris,omitempty" toml:"uris"`
+	DNSs          []string             `json:"dnss,omitempty" toml:"dnss"`
+	CertInterval  configutil.Duration  `json:"certinterval,omitempty" toml:"certinterval"`
+	CertPool      configutil.CertPool  `json:"certpool,omitempty" toml:"certpool"`
+	CAPEM         configutil.EnvString `json:"capem,omitempty" toml:"capem"`
+	CAKeyPEM      configutil.EnvString `json:"cakeypem,omitempty" toml:"cakeypem"`
+}
+
+type Config struct {
+	Type          string              `json:"type,omitempty" toml:"type"` // "ENV", "FILE", "SERVICE" OR "SELF"
+	Cert          string              `json:"cert,omitempty" toml:"cert"`
+	Key           string              `json:"key,omitempty" toml:"key"`
+	CA            []string            `json:"ca,omitempty" toml:"ca"`
+	Interval      configutil.Duration `json:"interval,omitempty" toml:"interval"`
+	UseSystemPool bool                `json:"usesystempool,omitempty" toml:"usesystempool"`
+	Vault         *MiniVaultConfig    `json:"minivault,omitempty" toml:"minivault"`
+}
+
 type Loader interface {
 	io.Closer
 	Run() error
 	GetCA() *x509.CertPool
 }
 
-func initLoader(conf *config.TLSConfig, certChannel chan *tls.Certificate, client bool, logger zLogger.ZLogger) (l Loader, err error) {
+func initLoader(conf *Config, certChannel chan *tls.Certificate, client bool, logger zLogger.ZLogger) (l Loader, err error) {
 	if conf.Interval == 0 {
 		conf.Interval = configutil.Duration(time.Minute * 15)
 
@@ -33,6 +57,27 @@ func initLoader(conf *config.TLSConfig, certChannel chan *tls.Certificate, clien
 		l, err = NewFileLoader(certChannel, client, conf.Cert, conf.Key, conf.CA, conf.UseSystemPool, time.Duration(conf.Interval), logger)
 	case "DEV":
 		l, err = NewDevLoader(certChannel, client, conf.UseSystemPool, time.Duration(conf.Interval))
+	case "MINIVAULT":
+		vaultConf := conf.Vault
+		if vaultConf == nil {
+			err = errors.New("minivault config missing")
+			return
+		}
+		if strings.ToUpper(string(vaultConf.CAPEM)) == "AUTO" {
+
+		}
+		l, err = NewMiniVaultLoader(
+			vaultConf.BaseURL,
+			vaultConf.ParentToken,
+			vaultConf.TokenType,
+			vaultConf.TokenPolicies,
+			time.Duration(vaultConf.TokenInterval),
+			vaultConf.CertType,
+			vaultConf.URIs,
+			vaultConf.DNSs,
+			time.Duration(vaultConf.CertInterval),
+			nil,
+			logger)
 	default:
 		err = errors.Errorf("unknown loader type %s", conf.Type)
 		return
@@ -60,7 +105,7 @@ func initLoader(conf *config.TLSConfig, certChannel chan *tls.Certificate, clien
 	return
 }
 
-func CreateServerLoader(mutual bool, conf *config.TLSConfig, uris []string, logger zLogger.ZLogger) (tlsConfig *tls.Config, l Loader, err error) {
+func CreateServerLoader(mutual bool, conf *Config, uris []string, logger zLogger.ZLogger) (tlsConfig *tls.Config, l Loader, err error) {
 	certChannel := make(chan *tls.Certificate)
 	l, err = initLoader(conf, certChannel, false, logger)
 	if err != nil {
@@ -97,7 +142,7 @@ func CreateServerLoader(mutual bool, conf *config.TLSConfig, uris []string, logg
 	return
 }
 
-func CreateClientLoader(conf *config.TLSConfig, logger zLogger.ZLogger, hosts ...string) (tlsConfig *tls.Config, l Loader, err error) {
+func CreateClientLoader(conf *Config, logger zLogger.ZLogger, hosts ...string) (tlsConfig *tls.Config, l Loader, err error) {
 	certChannel := make(chan *tls.Certificate)
 	l, err = initLoader(conf, certChannel, true, logger)
 	if err != nil {
