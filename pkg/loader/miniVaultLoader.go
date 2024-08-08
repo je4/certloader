@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-func NewMiniVaultLoader(baseURL, parentToken string, tokenType string, tokenPolicies []string, tokenInterval time.Duration, certType string, uris, dnss []string, certInterval time.Duration, ca *x509.Certificate, logger zLogger.ZLogger) (*MiniVaultLoader, error) {
+func NewMiniVaultLoader(baseURL, parentToken, tokenType string, tokenPolicies []string, tokenInterval time.Duration, certType string, uris, dnss []string, certInterval time.Duration, vaultCertPool *x509.CertPool, logger zLogger.ZLogger) (*MiniVaultLoader, error) {
 	l := &MiniVaultLoader{
 		baseURL:       baseURL,
 		certChannel:   make(chan *tls.Certificate),
@@ -25,23 +25,14 @@ func NewMiniVaultLoader(baseURL, parentToken string, tokenType string, tokenPoli
 		dnss:          dnss,
 		certInterval:  certInterval,
 		tokenInterval: tokenInterval,
+		vaultCertPool: vaultCertPool,
 		done:          make(chan bool),
 		logger:        logger,
-	}
-	if ca != nil {
-		l.caCertPool = x509.NewCertPool()
-		l.caCertPool.AddCert(ca)
-	} else {
-		var err error
-		l.caCertPool, err = x509.SystemCertPool()
-		if err != nil {
-			return nil, errors.Wrap(err, "cannot get system cert pool")
-		}
 	}
 	l.client = &http.Client{
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
-				RootCAs: l.caCertPool,
+				RootCAs: l.vaultCertPool,
 			},
 		},
 	}
@@ -52,7 +43,6 @@ type MiniVaultLoader struct {
 	tokenMutex    sync.Mutex
 	client        *http.Client
 	certChannel   chan *tls.Certificate
-	caCertPool    *x509.CertPool
 	lastCheck     time.Time
 	done          chan bool
 	baseURL       string
@@ -66,6 +56,7 @@ type MiniVaultLoader struct {
 	dnss          []string
 	certInterval  time.Duration
 	logger        zLogger.ZLogger
+	vaultCertPool *x509.CertPool
 }
 
 func (f *MiniVaultLoader) setToken(token string, parent bool) {

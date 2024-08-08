@@ -9,27 +9,15 @@ import (
 	"time"
 )
 
-func NewEnvLoader(certChannel chan *tls.Certificate, client bool, cert, key string, ca []string, useSystemCertPool bool, interval time.Duration, logger zLogger.ZLogger) (*EnvLoader, error) {
+func NewEnvLoader(certChannel chan *tls.Certificate, client bool, cert, key string, certPool *x509.CertPool, interval time.Duration, logger zLogger.ZLogger) (*EnvLoader, error) {
 	l := &EnvLoader{
 		certChannel: certChannel,
 		cert:        cert,
 		key:         key,
-		caCertPool:  x509.NewCertPool(),
+		caCertPool:  certPool,
 		interval:    interval,
 		done:        make(chan bool),
 		logger:      logger,
-	}
-	if useSystemCertPool {
-		systemCertPool, err := x509.SystemCertPool()
-		if err != nil {
-			return nil, errors.Wrap(err, "cannot get system cert pool")
-		}
-		l.caCertPool = systemCertPool
-	}
-	for _, c := range ca {
-		if !l.caCertPool.AppendCertsFromPEM([]byte(os.Getenv(c))) {
-			return nil, errors.Errorf("cannot append ca from %s", c)
-		}
 	}
 
 	return l, nil

@@ -9,31 +9,15 @@ import (
 	"time"
 )
 
-func NewFileLoader(certChannel chan *tls.Certificate, client bool, cert, key string, ca []string, useSystemCertPool bool, interval time.Duration, logger zLogger.ZLogger) (*FileLoader, error) {
+func NewFileLoader(certChannel chan *tls.Certificate, client bool, cert, key string, certPool *x509.CertPool, interval time.Duration, logger zLogger.ZLogger) (*FileLoader, error) {
 	l := &FileLoader{
 		certChannel: certChannel,
 		cert:        cert,
 		key:         key,
-		caCertPool:  x509.NewCertPool(),
 		interval:    interval,
 		done:        make(chan bool),
 		logger:      logger,
-	}
-	if useSystemCertPool {
-		systemCertPool, err := x509.SystemCertPool()
-		if err != nil {
-			return nil, errors.Wrap(err, "cannot get system cert pool")
-		}
-		l.caCertPool = systemCertPool
-	}
-	for _, caName := range ca {
-		pemData, err := os.ReadFile(caName)
-		if err != nil {
-			return nil, errors.Wrapf(err, "cannot read ca file %s", ca)
-		}
-		if !l.caCertPool.AppendCertsFromPEM(pemData) {
-			return nil, errors.Errorf("cannot append ca from %s", caName)
-		}
+		caCertPool:  certPool,
 	}
 
 	return l, nil

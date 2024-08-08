@@ -15,28 +15,38 @@ import (
 )
 
 type MiniVaultConfig struct {
-	BaseURL       string               `json:"baseurl,omitempty" toml:"baseurl"`
-	ParentToken   string               `json:"parenttoken,omitempty" toml:"parenttoken"`
-	TokenType     string               `json:"tokentype,omitempty" toml:"tokentype"`
-	TokenPolicies []string             `json:"tokenpolicies,omitempty" toml:"tokenpolicies"`
-	TokenInterval configutil.Duration  `json:"tokeninterval,omitempty" toml:"tokeninterval"`
-	CertType      string               `json:"certtype,omitempty" toml:"certtype"`
-	URIs          []string             `json:"uris,omitempty" toml:"uris"`
-	DNSs          []string             `json:"dnss,omitempty" toml:"dnss"`
-	CertInterval  configutil.Duration  `json:"certinterval,omitempty" toml:"certinterval"`
-	CertPool      configutil.CertPool  `json:"certpool,omitempty" toml:"certpool"`
-	CAPEM         configutil.EnvString `json:"capem,omitempty" toml:"capem"`
-	CAKeyPEM      configutil.EnvString `json:"cakeypem,omitempty" toml:"cakeypem"`
+	BaseURL       string                   `json:"baseurl,omitempty" toml:"baseurl"`
+	ParentToken   string                   `json:"parenttoken,omitempty" toml:"parenttoken"`
+	TokenType     string                   `json:"tokentype,omitempty" toml:"tokentype"`
+	TokenPolicies []string                 `json:"tokenpolicies,omitempty" toml:"tokenpolicies"`
+	TokenInterval configutil.Duration      `json:"tokeninterval,omitempty" toml:"tokeninterval"`
+	CertType      string                   `json:"certtype,omitempty" toml:"certtype"`
+	URIs          []string                 `json:"uris,omitempty" toml:"uris"`
+	DNSs          []string                 `json:"dnss,omitempty" toml:"dnss"`
+	CertInterval  configutil.Duration      `json:"certinterval,omitempty" toml:"certinterval"`
+	Certificates  []configutil.Certificate `json:"certificates,omitempty" toml:"certificates"`
+	CA            []configutil.Certificate `json:"ca,omitempty" toml:"ca"`
+	UseSystemPool bool                     `json:"usesystempool,omitempty" toml:"usesystempool"`
+}
+
+type FileConfig struct {
+	Cert string `json:"cert,omitempty" toml:"cert"`
+	Key  string `json:"key,omitempty" toml:"key"`
+}
+
+type EnvConfig struct {
+	Cert string `json:"cert,omitempty" toml:"cert"`
+	Key  string `json:"key,omitempty" toml:"key"`
 }
 
 type Config struct {
-	Type          string              `json:"type,omitempty" toml:"type"` // "ENV", "FILE", "SERVICE" OR "SELF"
-	Cert          string              `json:"cert,omitempty" toml:"cert"`
-	Key           string              `json:"key,omitempty" toml:"key"`
-	CA            []string            `json:"ca,omitempty" toml:"ca"`
-	Interval      configutil.Duration `json:"interval,omitempty" toml:"interval"`
-	UseSystemPool bool                `json:"usesystempool,omitempty" toml:"usesystempool"`
-	Vault         *MiniVaultConfig    `json:"minivault,omitempty" toml:"minivault"`
+	Type          string                   `json:"type,omitempty" toml:"type"` // "ENV", "FILE", "SERVICE" OR "SELF"
+	Interval      configutil.Duration      `json:"interval,omitempty" toml:"interval"`
+	Vault         *MiniVaultConfig         `json:"minivault,omitempty" toml:"minivault"`
+	File          *FileConfig              `json:"file,omitempty" toml:"file"`
+	Env           *EnvConfig               `json:"env,omitempty" toml:"env"`
+	CA            []configutil.Certificate `json:"ca,omitempty" toml:"ca"`
+	UseSystemPool bool                     `json:"usesystempool,omitempty" toml:"usesystempool"`
 }
 
 type Loader interface {
@@ -48,13 +58,29 @@ type Loader interface {
 func initLoader(conf *Config, certChannel chan *tls.Certificate, client bool, logger zLogger.ZLogger) (l Loader, err error) {
 	if conf.Interval == 0 {
 		conf.Interval = configutil.Duration(time.Minute * 15)
-
+	}
+	var certPool *x509.CertPool
+	if len(conf.CA) == 0 || conf.UseSystemPool {
+		certPool, err = x509.SystemCertPool()
+	} else {
+		certPool = x509.NewCertPool()
+	}
+	for _, cert := range conf.CA {
+		certPool.AddCert(cert.Certificate)
 	}
 	switch strings.ToUpper(conf.Type) {
 	case "ENV":
-		l, err = NewEnvLoader(certChannel, client, conf.Cert, conf.Key, conf.CA, conf.UseSystemPool, time.Duration(conf.Interval), logger)
+		if conf.Env == nil {
+			err = errors.New("env config missing")
+			return
+		}
+		l, err = NewEnvLoader(certChannel, client, conf.Env.Cert, conf.Env.Key, certPool, time.Duration(conf.Interval), logger)
 	case "FILE":
-		l, err = NewFileLoader(certChannel, client, conf.Cert, conf.Key, conf.CA, conf.UseSystemPool, time.Duration(conf.Interval), logger)
+		if conf.File == nil {
+			err = errors.New("file config missing")
+			return
+		}
+		l, err = NewFileLoader(certChannel, client, conf.File.Cert, conf.File.Key, certPool, time.Duration(conf.Interval), logger)
 	case "DEV":
 		l, err = NewDevLoader(certChannel, client, conf.UseSystemPool, time.Duration(conf.Interval))
 	case "MINIVAULT":
@@ -63,8 +89,14 @@ func initLoader(conf *Config, certChannel chan *tls.Certificate, client bool, lo
 			err = errors.New("minivault config missing")
 			return
 		}
-		if strings.ToUpper(string(vaultConf.CAPEM)) == "AUTO" {
-
+		var vaultCertPool *x509.CertPool
+		if len(vaultConf.CA) == 0 || conf.UseSystemPool {
+			vaultCertPool, err = x509.SystemCertPool()
+		} else {
+			vaultCertPool = x509.NewCertPool()
+		}
+		for _, cert := range vaultConf.CA {
+			vaultCertPool.AddCert(cert.Certificate)
 		}
 		l, err = NewMiniVaultLoader(
 			vaultConf.BaseURL,
@@ -76,7 +108,7 @@ func initLoader(conf *Config, certChannel chan *tls.Certificate, client bool, lo
 			vaultConf.URIs,
 			vaultConf.DNSs,
 			time.Duration(vaultConf.CertInterval),
-			nil,
+			vaultCertPool,
 			logger)
 	default:
 		err = errors.Errorf("unknown loader type %s", conf.Type)
