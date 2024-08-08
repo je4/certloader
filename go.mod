@@ -4,7 +4,7 @@ go 1.22.5
 
 require (
 	emperror.dev/errors v0.8.1
-	github.com/je4/trustutil/v2 v2.0.20
+	github.com/je4/trustutil/v2 v2.0.22
 	github.com/je4/utils/v2 v2.0.43
 	github.com/smallstep/certinfo v1.12.2
 )

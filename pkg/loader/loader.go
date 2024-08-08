@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"emperror.dev/errors"
+	configtrust "github.com/je4/trustutil/v2/pkg/config"
 	"github.com/je4/trustutil/v2/pkg/tlsutil"
 	configutil "github.com/je4/utils/v2/pkg/config"
 	"github.com/je4/utils/v2/pkg/zLogger"
@@ -15,18 +16,18 @@ import (
 )
 
 type MiniVaultConfig struct {
-	BaseURL       string                   `json:"baseurl,omitempty" toml:"baseurl"`
-	ParentToken   string                   `json:"parenttoken,omitempty" toml:"parenttoken"`
-	TokenType     string                   `json:"tokentype,omitempty" toml:"tokentype"`
-	TokenPolicies []string                 `json:"tokenpolicies,omitempty" toml:"tokenpolicies"`
-	TokenInterval configutil.Duration      `json:"tokeninterval,omitempty" toml:"tokeninterval"`
-	CertType      string                   `json:"certtype,omitempty" toml:"certtype"`
-	URIs          []string                 `json:"uris,omitempty" toml:"uris"`
-	DNSs          []string                 `json:"dnss,omitempty" toml:"dnss"`
-	CertInterval  configutil.Duration      `json:"certinterval,omitempty" toml:"certinterval"`
-	Certificates  []configutil.Certificate `json:"certificates,omitempty" toml:"certificates"`
-	CA            []configutil.Certificate `json:"ca,omitempty" toml:"ca"`
-	UseSystemPool bool                     `json:"usesystempool,omitempty" toml:"usesystempool"`
+	BaseURL       string                    `json:"baseurl,omitempty" toml:"baseurl"`
+	ParentToken   string                    `json:"parenttoken,omitempty" toml:"parenttoken"`
+	TokenType     string                    `json:"tokentype,omitempty" toml:"tokentype"`
+	TokenPolicies []string                  `json:"tokenpolicies,omitempty" toml:"tokenpolicies"`
+	TokenInterval configutil.Duration       `json:"tokeninterval,omitempty" toml:"tokeninterval"`
+	CertType      string                    `json:"certtype,omitempty" toml:"certtype"`
+	URIs          []string                  `json:"uris,omitempty" toml:"uris"`
+	DNSs          []string                  `json:"dnss,omitempty" toml:"dnss"`
+	CertInterval  configutil.Duration       `json:"certinterval,omitempty" toml:"certinterval"`
+	Certificates  []configtrust.Certificate `json:"certificates,omitempty" toml:"certificates"`
+	CA            []configtrust.Certificate `json:"ca,omitempty" toml:"ca"`
+	UseSystemPool bool                      `json:"usesystempool,omitempty" toml:"usesystempool"`
 }
 
 type FileConfig struct {
@@ -40,13 +41,13 @@ type EnvConfig struct {
 }
 
 type Config struct {
-	Type          string                   `json:"type,omitempty" toml:"type"` // "ENV", "FILE", "SERVICE" OR "SELF"
-	Interval      configutil.Duration      `json:"interval,omitempty" toml:"interval"`
-	Vault         *MiniVaultConfig         `json:"minivault,omitempty" toml:"minivault"`
-	File          *FileConfig              `json:"file,omitempty" toml:"file"`
-	Env           *EnvConfig               `json:"env,omitempty" toml:"env"`
-	CA            []configutil.Certificate `json:"ca,omitempty" toml:"ca"`
-	UseSystemPool bool                     `json:"usesystempool,omitempty" toml:"usesystempool"`
+	Type          string                    `json:"type,omitempty" toml:"type"` // "ENV", "FILE", "SERVICE" OR "SELF"
+	Interval      configutil.Duration       `json:"interval,omitempty" toml:"interval"`
+	Vault         *MiniVaultConfig          `json:"minivault,omitempty" toml:"minivault"`
+	File          *FileConfig               `json:"file,omitempty" toml:"file"`
+	Env           *EnvConfig                `json:"env,omitempty" toml:"env"`
+	CA            []configtrust.Certificate `json:"ca,omitempty" toml:"ca"`
+	UseSystemPool bool                      `json:"usesystempool,omitempty" toml:"usesystempool"`
 }
 
 type Loader interface {
