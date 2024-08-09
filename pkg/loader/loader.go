@@ -16,16 +16,16 @@ import (
 )
 
 type MiniVaultConfig struct {
-	BaseURL       string                    `json:"baseurl,omitempty" toml:"baseurl"`
-	ParentToken   string                    `json:"parenttoken,omitempty" toml:"parenttoken"`
-	TokenType     string                    `json:"tokentype,omitempty" toml:"tokentype"`
-	TokenPolicies []string                  `json:"tokenpolicies,omitempty" toml:"tokenpolicies"`
-	TokenInterval configutil.Duration       `json:"tokeninterval,omitempty" toml:"tokeninterval"`
-	CertType      string                    `json:"certtype,omitempty" toml:"certtype"`
-	URIs          []string                  `json:"uris,omitempty" toml:"uris"`
-	DNSs          []string                  `json:"dnss,omitempty" toml:"dnss"`
-	CertInterval  configutil.Duration       `json:"certinterval,omitempty" toml:"certinterval"`
-	Certificates  []configtrust.Certificate `json:"certificates,omitempty" toml:"certificates"`
+	BaseURL       string              `json:"baseurl,omitempty" toml:"baseurl"`
+	ParentToken   string              `json:"parenttoken,omitempty" toml:"parenttoken"`
+	TokenType     string              `json:"tokentype,omitempty" toml:"tokentype"`
+	TokenPolicies []string            `json:"tokenpolicies,omitempty" toml:"tokenpolicies"`
+	TokenInterval configutil.Duration `json:"tokeninterval,omitempty" toml:"tokeninterval"`
+	CertType      string              `json:"certtype,omitempty" toml:"certtype"`
+	URIs          []string            `json:"uris,omitempty" toml:"uris"`
+	DNSs          []string            `json:"dnss,omitempty" toml:"dnss"`
+	CertInterval  configutil.Duration `json:"certinterval,omitempty" toml:"certinterval"`
+	//Certificates  []configtrust.Certificate `json:"certificates,omitempty" toml:"certificates"`
 	CA            []configtrust.Certificate `json:"ca,omitempty" toml:"ca"`
 	UseSystemPool bool                      `json:"usesystempool,omitempty" toml:"usesystempool"`
 }
@@ -41,24 +41,28 @@ type EnvConfig struct {
 }
 
 type Config struct {
-	Type          string                    `json:"type,omitempty" toml:"type"` // "ENV", "FILE", "SERVICE" OR "SELF"
-	Interval      configutil.Duration       `json:"interval,omitempty" toml:"interval"`
-	Vault         *MiniVaultConfig          `json:"minivault,omitempty" toml:"minivault"`
-	File          *FileConfig               `json:"file,omitempty" toml:"file"`
-	Env           *EnvConfig                `json:"env,omitempty" toml:"env"`
-	CA            []configtrust.Certificate `json:"ca,omitempty" toml:"ca"`
-	UseSystemPool bool                      `json:"usesystempool,omitempty" toml:"usesystempool"`
+	Type           string                    `json:"type,omitempty" toml:"type"` // "ENV", "FILE", "SERVICE" OR "SELF"
+	Interval       configutil.Duration       `json:"interval,omitempty" toml:"interval"`
+	Vault          *MiniVaultConfig          `json:"minivault,omitempty" toml:"minivault"`
+	File           *FileConfig               `json:"file,omitempty" toml:"file"`
+	Env            *EnvConfig                `json:"env,omitempty" toml:"env"`
+	CA             []configtrust.Certificate `json:"ca,omitempty" toml:"ca"`
+	UseSystemPool  bool                      `json:"usesystempool,omitempty" toml:"usesystempool"`
+	InitialTimeout configutil.Duration       `json:"initialtimeout,omitempty" toml:"initialtimeout"`
 }
 
 type Loader interface {
 	io.Closer
 	Run() error
-	GetCA() *x509.CertPool
+	GetCA() (*x509.CertPool, error)
 }
 
 func initLoader(conf *Config, certChannel chan *tls.Certificate, client bool, logger zLogger.ZLogger) (l Loader, err error) {
 	if conf.Interval == 0 {
 		conf.Interval = configutil.Duration(time.Minute * 15)
+	}
+	if conf.InitialTimeout == 0 {
+		conf.InitialTimeout = configutil.Duration(time.Minute)
 	}
 	var certPool *x509.CertPool
 	if len(conf.CA) == 0 || conf.UseSystemPool {
@@ -100,6 +104,7 @@ func initLoader(conf *Config, certChannel chan *tls.Certificate, client bool, lo
 			vaultCertPool.AddCert(cert.Certificate)
 		}
 		l, err = NewMiniVaultLoader(
+			certChannel,
 			vaultConf.BaseURL,
 			vaultConf.ParentToken,
 			vaultConf.TokenType,
@@ -139,6 +144,9 @@ func initLoader(conf *Config, certChannel chan *tls.Certificate, client bool, lo
 }
 
 func CreateServerLoader(mutual bool, conf *Config, uris []string, logger zLogger.ZLogger) (tlsConfig *tls.Config, l Loader, err error) {
+	if conf.InitialTimeout == 0 {
+		conf.InitialTimeout = configutil.Duration(time.Minute)
+	}
 	certChannel := make(chan *tls.Certificate)
 	l, err = initLoader(conf, certChannel, false, logger)
 	if err != nil {
@@ -162,10 +170,15 @@ func CreateServerLoader(mutual bool, conf *Config, uris []string, logger zLogger
 				}
 			}
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(time.Duration(conf.InitialTimeout)):
 		return nil, nil, errors.New("timeout waiting for initial certificate")
 	}
-	tlsConfig, err = tlsutil.CreateServerTLSConfig(*cert, mutual, uris, l.GetCA())
+	// after getting a certificate there should be no problem getting die CA
+	ca, err := l.GetCA()
+	if err != nil {
+		return nil, nil, errors.Wrap(err, "cannot get ca")
+	}
+	tlsConfig, err = tlsutil.CreateServerTLSConfig(*cert, mutual, uris, ca)
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "cannot create server tls config")
 	}
@@ -176,6 +189,9 @@ func CreateServerLoader(mutual bool, conf *Config, uris []string, logger zLogger
 }
 
 func CreateClientLoader(conf *Config, logger zLogger.ZLogger, hosts ...string) (tlsConfig *tls.Config, l Loader, err error) {
+	if conf.InitialTimeout == 0 {
+		conf.InitialTimeout = configutil.Duration(time.Minute)
+	}
 	certChannel := make(chan *tls.Certificate)
 	l, err = initLoader(conf, certChannel, true, logger)
 	if err != nil {
@@ -199,10 +215,14 @@ func CreateClientLoader(conf *Config, logger zLogger.ZLogger, hosts ...string) (
 				}
 			}
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(time.Duration(conf.InitialTimeout)):
 		return nil, nil, errors.New("timeout waiting for initial certificate")
 	}
-	tlsConfig, err = tlsutil.CreateClientMTLSConfig(*cert, l.GetCA())
+	ca, err := l.GetCA()
+	if err != nil {
+		return nil, nil, errors.Wrap(err, "cannot get ca")
+	}
+	tlsConfig, err = tlsutil.CreateClientMTLSConfig(*cert, ca)
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "cannot create server tls config")
 	}

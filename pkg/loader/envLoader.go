@@ -35,8 +35,8 @@ type EnvLoader struct {
 	caCertPool  *x509.CertPool
 }
 
-func (f *EnvLoader) GetCA() *x509.CertPool {
-	return f.caCertPool
+func (f *EnvLoader) GetCA() (*x509.CertPool, error) {
+	return f.caCertPool, nil
 }
 
 func (f *EnvLoader) load() error {

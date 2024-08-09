@@ -85,8 +85,8 @@ func (d *devLoader) Run() error {
 	return nil
 }
 
-func (d *devLoader) GetCA() *x509.CertPool {
-	return d.caCertPool
+func (d *devLoader) GetCA() (*x509.CertPool, error) {
+	return d.caCertPool, nil
 }
 
 var _ Loader = (*devLoader)(nil)

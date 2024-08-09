@@ -1,22 +1,22 @@
 package loader
 
 import (
-	"bytes"
 	"crypto/tls"
 	"crypto/x509"
 	"emperror.dev/errors"
-	"encoding/json"
+	"github.com/je4/minivault/v2/pkg/cert"
+	vaultClient "github.com/je4/minivault/v2/pkg/client"
+	"github.com/je4/minivault/v2/pkg/token"
 	"github.com/je4/utils/v2/pkg/zLogger"
-	"io"
-	"net/http"
 	"sync"
 	"time"
 )
 
-func NewMiniVaultLoader(baseURL, parentToken, tokenType string, tokenPolicies []string, tokenInterval time.Duration, certType string, uris, dnss []string, certInterval time.Duration, vaultCertPool *x509.CertPool, logger zLogger.ZLogger) (*MiniVaultLoader, error) {
+func NewMiniVaultLoader(certChannel chan *tls.Certificate, baseURL, parentToken, tokenType string, tokenPolicies []string, tokenInterval time.Duration, certType string, uris, dnss []string, certInterval time.Duration, vaultCertPool *x509.CertPool, logger zLogger.ZLogger) (*MiniVaultLoader, error) {
 	l := &MiniVaultLoader{
+		vaultClient:   vaultClient.NewClient(baseURL, vaultCertPool),
 		baseURL:       baseURL,
-		certChannel:   make(chan *tls.Certificate),
+		certChannel:   certChannel,
 		parentToken:   parentToken,
 		tokenPolicies: tokenPolicies,
 		certType:      certType,
@@ -29,19 +29,23 @@ func NewMiniVaultLoader(baseURL, parentToken, tokenType string, tokenPolicies []
 		done:          make(chan bool),
 		logger:        logger,
 	}
-	l.client = &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				RootCAs: l.vaultCertPool,
+	/*
+		l.client = &http.Client{
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{
+					RootCAs: l.vaultCertPool,
+				},
 			},
-		},
-	}
+		}
+
+	*/
 	return l, nil
 }
 
 type MiniVaultLoader struct {
-	tokenMutex    sync.Mutex
-	client        *http.Client
+	tokenMutex sync.Mutex
+	//	client        *http.Client
+	vaultClient   *vaultClient.Client
 	certChannel   chan *tls.Certificate
 	lastCheck     time.Time
 	done          chan bool
@@ -84,6 +88,7 @@ type TokenCreateStruct struct {
 	Policies  []string          `json:"Policies" example:"policy1,policy2"`
 	Meta      map[string]string `json:"meta" example:"key1:value1,key2:value2"`
 	TTL       string            `json:"ttl" example:"1h"`
+	MaxTTL    string            `json:"maxttl" example:"3h"`
 	Renewable bool              `json:"renewable" example:"false"`
 }
 
@@ -91,36 +96,15 @@ func (f *MiniVaultLoader) loadToken() (string, error) {
 	if f.parentToken == "" {
 		return "", errors.New("no parent token")
 	}
-	param := &TokenCreateStruct{
+	param := &token.CreateStruct{
 		Type:     f.tokenType,
 		Policies: f.tokenPolicies,
 		Meta:     map[string]string{},
 		TTL:      f.tokenInterval.String(),
 	}
-	data, err := json.Marshal(param)
-	if err != nil {
-		f.logger.Error().Err(err).Msg("cannot marshal request")
-	}
-	req, err := http.NewRequest("POST", f.baseURL+"/token/create", bytes.NewBuffer(data))
-	if err != nil {
-		return "", errors.Wrap(err, "cannot create request")
-	}
-	req.Header.Set("X-Vault-Token", f.getToken(true))
-	resp, err := f.client.Do(req)
+	result, err := f.vaultClient.CreateToken(f.parentToken, param)
 	if err != nil {
 		return "", errors.Wrap(err, "cannot get token")
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		if result, err := io.ReadAll(resp.Body); err != nil {
-			return "", errors.Wrapf(err, "cannot get token: %s - %s", resp.Status, string(result))
-		} else {
-			return "", errors.Wrapf(err, "cannot get token: %s", resp.Status)
-		}
-	}
-	var result string
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", errors.Wrap(err, "cannot decode token")
 	}
 	return result, nil
 }
@@ -142,42 +126,25 @@ func (f *MiniVaultLoader) loadCert() (*tls.Certificate, error) {
 	if f.token == "" {
 		return nil, errors.New("no token")
 	}
-	param := &CertCreateStruct{
+	param := &cert.CreateStruct{
 		Type:     f.certType,
 		URIs:     f.uris,
 		DNSNames: f.dnss,
 		TTL:      f.certInterval.String(),
 	}
-	data, err := json.Marshal(param)
-	if err != nil {
-		f.logger.Error().Err(err).Msg("cannot marshal request")
-	}
-	req, err := http.NewRequest("POST", f.baseURL+"/cert/create", bytes.NewBuffer(data))
-	if err != nil {
-		return nil, errors.Wrap(err, "cannot create request")
-	}
-	req.Header.Set("X-Vault-Token", f.getToken(false))
-	resp, err := f.client.Do(req)
+	result, err := f.vaultClient.CreateCert(f.token, param)
 	if err != nil {
 		return nil, errors.Wrap(err, "cannot get cert")
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		if result, err := io.ReadAll(resp.Body); err != nil {
-			return nil, errors.Wrapf(err, "cannot get cert: %s - %s", resp.Status, string(result))
-		} else {
-			return nil, errors.Wrapf(err, "cannot get cert: %s", resp.Status)
-		}
-	}
-	result := CertResultMessage{}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, errors.Wrap(err, "cannot decode cert")
-	}
-	cert, err := tls.X509KeyPair([]byte(result.Cert), []byte(result.Key))
+	return result.Cert, nil
+}
+
+func (f *MiniVaultLoader) GetCA() (*x509.CertPool, error) {
+	pool, err := f.vaultClient.GetCA()
 	if err != nil {
-		return nil, errors.Wrap(err, "cannot create x509 key pair")
+		return nil, errors.Wrap(err, "cannot get ca")
 	}
-	return &cert, nil
+	return pool, nil
 }
 
 func (f *MiniVaultLoader) Close() error {
@@ -189,6 +156,36 @@ func (f *MiniVaultLoader) Close() error {
 func (f *MiniVaultLoader) Run() error {
 	var tokenDone = make(chan bool)
 	var certDone = make(chan bool)
+
+	for { // token retry loop
+		if token, err := f.loadToken(); err == nil {
+			f.setToken(token, false)
+			break
+		} else {
+			f.logger.Error().Err(err).Msg("cannot get token")
+			f.logger.Info().Msg("token sleeping 10s")
+			select {
+			case <-tokenDone:
+				return nil
+			case <-time.After(10 * time.Second):
+			}
+		}
+	} // end token retry loop
+	for { // cert retry loop
+		if cert, err := f.loadCert(); err == nil {
+			f.certChannel <- cert
+			break
+		} else {
+			f.logger.Error().Err(err).Msg("cannot get cert")
+			f.logger.Info().Msg("cert sleeping 10s")
+			select {
+			case <-certDone:
+				return nil
+			case <-time.After(10 * time.Second):
+			}
+		}
+	} // end cert retry loop
+
 	var wg = sync.WaitGroup{}
 	wg.Add(2)
 	go func() {
@@ -247,42 +244,6 @@ func (f *MiniVaultLoader) Run() error {
 	close(certDone)
 	wg.Wait()
 	return nil
-}
-
-func (f *MiniVaultLoader) GetCA() *x509.CertPool {
-	req, err := http.NewRequest("GET", f.baseURL+"/cert/ca/pem", nil)
-	if err != nil {
-		f.logger.Error().Err(err).Msg("cannot create request")
-		return nil
-	}
-	req.Header.Set("X-Vault-Token", f.token)
-	resp, err := f.client.Do(req)
-	if err != nil {
-		f.logger.Error().Err(err).Msg("cannot get ca")
-		return nil
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		if result, err := io.ReadAll(resp.Body); err != nil {
-			f.logger.Error().Msgf("cannot get ca: %s - %s", resp.Status, string(result))
-		} else {
-			f.logger.Error().Msgf("cannot get ca: %s", resp.Status)
-		}
-		return nil
-	}
-	result := CertResultMessage{}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		f.logger.Error().Err(err).Msg("cannot decode ca")
-		return nil
-	}
-	caCert, err := x509.ParseCertificate([]byte(result.CA))
-	if err != nil {
-		f.logger.Error().Err(err).Msg("cannot parse ca")
-		return nil
-	}
-	caCertPool := x509.NewCertPool()
-	caCertPool.AddCert(caCert)
-	return caCertPool
 }
 
 var _ Loader = (*MiniVaultLoader)(nil)

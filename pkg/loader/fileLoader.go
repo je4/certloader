@@ -34,8 +34,8 @@ type FileLoader struct {
 	logger      zLogger.ZLogger
 }
 
-func (f *FileLoader) GetCA() *x509.CertPool {
-	return f.caCertPool
+func (f *FileLoader) GetCA() (*x509.CertPool, error) {
+	return f.caCertPool, nil
 }
 
 func (f *FileLoader) isNew() (bool, error) {
