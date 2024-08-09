@@ -12,7 +12,17 @@ import (
 	"time"
 )
 
-func NewMiniVaultLoader(certChannel chan *tls.Certificate, baseURL, parentToken, tokenType string, tokenPolicies []string, tokenInterval time.Duration, certType string, uris, dnss []string, certInterval time.Duration, vaultCertPool *x509.CertPool, logger zLogger.ZLogger) (*MiniVaultLoader, error) {
+func NewMiniVaultLoader(
+	certChannel chan *tls.Certificate,
+	baseURL, parentToken, tokenType string,
+	tokenPolicies []string,
+	tokenInterval, tokenTTL time.Duration,
+	certType string,
+	uris, dnss, ips []string,
+	certInterval, certTTL time.Duration,
+	vaultCertPool *x509.CertPool,
+	logger zLogger.ZLogger,
+) (*MiniVaultLoader, error) {
 	l := &MiniVaultLoader{
 		vaultClient:   vaultClient.NewClient(baseURL, vaultCertPool),
 		baseURL:       baseURL,
@@ -23,8 +33,11 @@ func NewMiniVaultLoader(certChannel chan *tls.Certificate, baseURL, parentToken,
 		tokenType:     tokenType,
 		uris:          uris,
 		dnss:          dnss,
+		ips:           ips,
 		certInterval:  certInterval,
+		certTTL:       certTTL,
 		tokenInterval: tokenInterval,
+		tokenTTL:      tokenTTL,
 		vaultCertPool: vaultCertPool,
 		done:          make(chan bool),
 		logger:        logger,
@@ -58,9 +71,12 @@ type MiniVaultLoader struct {
 	certType      string
 	uris          []string
 	dnss          []string
+	ips           []string
 	certInterval  time.Duration
 	logger        zLogger.ZLogger
 	vaultCertPool *x509.CertPool
+	certTTL       time.Duration
+	tokenTTL      time.Duration
 }
 
 func (f *MiniVaultLoader) setToken(token string, parent bool) {
@@ -100,7 +116,7 @@ func (f *MiniVaultLoader) loadToken() (string, error) {
 		Type:     f.tokenType,
 		Policies: f.tokenPolicies,
 		Meta:     map[string]string{},
-		TTL:      f.tokenInterval.String(),
+		TTL:      f.tokenTTL.String(),
 	}
 	result, err := f.vaultClient.CreateToken(f.parentToken, param)
 	if err != nil {
@@ -130,7 +146,8 @@ func (f *MiniVaultLoader) loadCert() (*tls.Certificate, error) {
 		Type:     f.certType,
 		URIs:     f.uris,
 		DNSNames: f.dnss,
-		TTL:      f.certInterval.String(),
+		IPs:      f.ips,
+		TTL:      f.certTTL.String(),
 	}
 	result, err := f.vaultClient.CreateCert(f.token, param)
 	if err != nil {
@@ -190,30 +207,6 @@ func (f *MiniVaultLoader) Run() error {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		for { // token loop
-			select {
-			case <-tokenDone:
-				return
-			case <-time.After(f.tokenInterval):
-				for { // token retry loop
-					if token, err := f.loadToken(); err == nil {
-						f.setToken(token, false)
-						break
-					} else {
-						f.logger.Error().Err(err).Msg("cannot get token")
-						f.logger.Info().Msg("token sleeping 10s")
-						select {
-						case <-tokenDone:
-							return
-						case <-time.After(10 * time.Second):
-						}
-					}
-				} // end token retry loop
-			}
-		} // end token loop
-	}()
-	go func() {
-		defer wg.Done()
 		for { // cert loop
 			f.logger.Info().Msgf("cert sleeping %s", f.certInterval.String())
 			select {
@@ -236,6 +229,31 @@ func (f *MiniVaultLoader) Run() error {
 				} // end cert retry loop
 			}
 		} // end cert loop
+	}()
+	go func() {
+		defer wg.Done()
+		for { // token loop
+			f.logger.Info().Msgf("token sleeping %s", f.tokenInterval.String())
+			select {
+			case <-tokenDone:
+				return
+			case <-time.After(f.tokenInterval):
+				for { // token retry loop
+					if token, err := f.loadToken(); err == nil {
+						f.setToken(token, false)
+						break
+					} else {
+						f.logger.Error().Err(err).Msg("cannot get token")
+						f.logger.Info().Msg("token sleeping 10s")
+						select {
+						case <-tokenDone:
+							return
+						case <-time.After(10 * time.Second):
+						}
+					}
+				} // end token retry loop
+			}
+		} // end token loop
 	}()
 	select {
 	case <-f.done:

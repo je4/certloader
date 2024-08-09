@@ -21,10 +21,13 @@ type MiniVaultConfig struct {
 	TokenType     string              `json:"tokentype,omitempty" toml:"tokentype"`
 	TokenPolicies []string            `json:"tokenpolicies,omitempty" toml:"tokenpolicies"`
 	TokenInterval configutil.Duration `json:"tokeninterval,omitempty" toml:"tokeninterval"`
+	TokenTTL      configutil.Duration `json:"tokenttl,omitempty" toml:"tokenttl"`
 	CertType      string              `json:"certtype,omitempty" toml:"certtype"`
 	URIs          []string            `json:"uris,omitempty" toml:"uris"`
 	DNSs          []string            `json:"dnss,omitempty" toml:"dnss"`
+	IPs           []string            `json:"ips,omitempty" toml:"ips"`
 	CertInterval  configutil.Duration `json:"certinterval,omitempty" toml:"certinterval"`
+	CertTTL       configutil.Duration `json:"certttl,omitempty" toml:"certttl"`
 	//Certificates  []configtrust.Certificate `json:"certificates,omitempty" toml:"certificates"`
 	CA            []configtrust.Certificate `json:"ca,omitempty" toml:"ca"`
 	UseSystemPool bool                      `json:"usesystempool,omitempty" toml:"usesystempool"`
@@ -110,10 +113,13 @@ func initLoader(conf *Config, certChannel chan *tls.Certificate, client bool, lo
 			vaultConf.TokenType,
 			vaultConf.TokenPolicies,
 			time.Duration(vaultConf.TokenInterval),
+			time.Duration(vaultConf.TokenTTL),
 			vaultConf.CertType,
 			vaultConf.URIs,
 			vaultConf.DNSs,
+			vaultConf.IPs,
 			time.Duration(vaultConf.CertInterval),
+			time.Duration(vaultConf.CertTTL),
 			vaultCertPool,
 			logger)
 	default:
