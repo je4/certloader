@@ -3,29 +3,43 @@ package loader
 import (
 	"crypto/tls"
 	"crypto/x509"
+	configutil "github.com/je4/utils/v2/pkg/config"
+	"github.com/je4/utils/v2/pkg/zLogger"
 	"time"
 
 	"emperror.dev/errors"
 	"github.com/je4/trustutil/v2/pkg/certutil"
 )
 
-func NewDevLoader(certChannel chan *tls.Certificate, client bool, useSystemCertPool bool, interval time.Duration) (Loader, error) {
+type DevConfig struct {
+	Interval      configutil.Duration `json:"interval,omitempty" toml:"interval"`
+	UseSystemPool bool                `json:"usesystempool,omitempty" toml:"usesystempool"`
+}
+
+func NewDevLoader(certChannel chan *tls.Certificate, client bool, conf *DevConfig, logger zLogger.ZLogger) (Loader, error) {
+	if conf == nil {
+		conf = &DevConfig{
+			Interval: configutil.Duration(time.Minute * 10),
+		}
+	}
+	var certPool *x509.CertPool
+	var err error
+	if conf.UseSystemPool {
+		certPool, err = x509.SystemCertPool()
+		if err != nil {
+			return nil, errors.Wrap(err, "cannot get system cert pool")
+		}
+	} else {
+		certPool = x509.NewCertPool()
+	}
+	certPool.AppendCertsFromPEM(certutil.DefaultCACrt)
 	l := &devLoader{
 		certChannel: certChannel,
 		client:      client,
 		done:        make(chan bool),
-		interval:    interval,
-		caCertPool:  x509.NewCertPool(),
-	}
-	if useSystemCertPool {
-		systemCertPool, err := x509.SystemCertPool()
-		if err != nil {
-			return nil, errors.Wrap(err, "cannot get system cert pool")
-		}
-		l.caCertPool = systemCertPool
-	}
-	if !l.caCertPool.AppendCertsFromPEM(certutil.DefaultCACrt) {
-		return nil, errors.Errorf("cannot append ca from default ca")
+		interval:    time.Duration(conf.Interval),
+		caCertPool:  certPool,
+		logger:      logger,
 	}
 	return l, nil
 }
@@ -36,6 +50,7 @@ type devLoader struct {
 	done        chan bool
 	interval    time.Duration
 	caCertPool  *x509.CertPool
+	logger      zLogger.ZLogger
 }
 
 func (d *devLoader) Close() error {

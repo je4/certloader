@@ -4,17 +4,44 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"emperror.dev/errors"
+	configtrust "github.com/je4/trustutil/v2/pkg/config"
+	configutil "github.com/je4/utils/v2/pkg/config"
 	"github.com/je4/utils/v2/pkg/zLogger"
 	"os"
 	"time"
 )
 
-func NewFileLoader(certChannel chan *tls.Certificate, client bool, cert, key string, certPool *x509.CertPool, interval time.Duration, logger zLogger.ZLogger) (*FileLoader, error) {
+type FileConfig struct {
+	Cert          string                    `json:"cert,omitempty" toml:"cert"`
+	Key           string                    `json:"key,omitempty" toml:"key"`
+	Interval      configutil.Duration       `json:"interval,omitempty" toml:"interval"`
+	CA            []configtrust.Certificate `json:"ca,omitempty" toml:"ca"`
+	UseSystemPool bool                      `json:"usesystempool,omitempty" toml:"usesystempool"`
+}
+
+func NewFileLoader(certChannel chan *tls.Certificate, conf *FileConfig, logger zLogger.ZLogger) (*FileLoader, error) {
+	if conf == nil {
+		return nil, errors.New("file config missing")
+	}
+	var certPool *x509.CertPool
+	var err error
+	if conf.UseSystemPool || len(conf.CA) == 0 {
+		certPool, err = x509.SystemCertPool()
+		if err != nil {
+			return nil, errors.Wrap(err, "cannot get system cert pool")
+		}
+	} else {
+		certPool = x509.NewCertPool()
+	}
+	for _, cert := range conf.CA {
+		certPool.AddCert(cert.Certificate)
+	}
+
 	l := &FileLoader{
 		certChannel: certChannel,
-		cert:        cert,
-		key:         key,
-		interval:    interval,
+		cert:        conf.Cert,
+		key:         conf.Key,
+		interval:    time.Duration(conf.Interval),
 		done:        make(chan bool),
 		logger:      logger,
 		caCertPool:  certPool,

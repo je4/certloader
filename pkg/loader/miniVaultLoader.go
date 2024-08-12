@@ -7,37 +7,68 @@ import (
 	"github.com/je4/minivault/v2/pkg/cert"
 	vaultClient "github.com/je4/minivault/v2/pkg/client"
 	"github.com/je4/minivault/v2/pkg/token"
+	configtrust "github.com/je4/trustutil/v2/pkg/config"
+	configutil "github.com/je4/utils/v2/pkg/config"
 	"github.com/je4/utils/v2/pkg/zLogger"
 	"sync"
 	"time"
 )
 
+type MiniVaultConfig struct {
+	BaseURL       string              `json:"baseurl,omitempty" toml:"baseurl"`
+	ParentToken   string              `json:"parenttoken,omitempty" toml:"parenttoken"`
+	TokenType     string              `json:"tokentype,omitempty" toml:"tokentype"`
+	TokenPolicies []string            `json:"tokenpolicies,omitempty" toml:"tokenpolicies"`
+	TokenInterval configutil.Duration `json:"tokeninterval,omitempty" toml:"tokeninterval"`
+	TokenTTL      configutil.Duration `json:"tokenttl,omitempty" toml:"tokenttl"`
+	CertType      string              `json:"certtype,omitempty" toml:"certtype"`
+	URIs          []string            `json:"uris,omitempty" toml:"uris"`
+	DNSs          []string            `json:"dnss,omitempty" toml:"dnss"`
+	IPs           []string            `json:"ips,omitempty" toml:"ips"`
+	CertInterval  configutil.Duration `json:"certinterval,omitempty" toml:"certinterval"`
+	CertTTL       configutil.Duration `json:"certttl,omitempty" toml:"certttl"`
+	//Certificates  []configtrust.Certificate `json:"certificates,omitempty" toml:"certificates"`
+	CA            []configtrust.Certificate `json:"ca,omitempty" toml:"ca"`
+	UseSystemPool bool                      `json:"usesystempool,omitempty" toml:"usesystempool"`
+}
+
 func NewMiniVaultLoader(
 	certChannel chan *tls.Certificate,
-	baseURL, parentToken, tokenType string,
-	tokenPolicies []string,
-	tokenInterval, tokenTTL time.Duration,
-	certType string,
-	uris, dnss, ips []string,
-	certInterval, certTTL time.Duration,
-	vaultCertPool *x509.CertPool,
+	conf *MiniVaultConfig,
 	logger zLogger.ZLogger,
 ) (*MiniVaultLoader, error) {
+	if conf == nil {
+		return nil, errors.New("minivault config missing")
+	}
+	var vaultCertPool *x509.CertPool
+	var err error
+	if conf.UseSystemPool || len(conf.CA) == 0 {
+		vaultCertPool, err = x509.SystemCertPool()
+		if err != nil {
+			return nil, errors.Wrap(err, "cannot get system cert pool")
+		}
+	} else {
+		vaultCertPool = x509.NewCertPool()
+	}
+	for _, cert := range conf.CA {
+		vaultCertPool.AddCert(cert.Certificate)
+	}
+
 	l := &MiniVaultLoader{
-		vaultClient:   vaultClient.NewClient(baseURL, vaultCertPool),
-		baseURL:       baseURL,
+		vaultClient:   vaultClient.NewClient(conf.BaseURL, vaultCertPool),
+		baseURL:       conf.BaseURL,
 		certChannel:   certChannel,
-		parentToken:   parentToken,
-		tokenPolicies: tokenPolicies,
-		certType:      certType,
-		tokenType:     tokenType,
-		uris:          uris,
-		dnss:          dnss,
-		ips:           ips,
-		certInterval:  certInterval,
-		certTTL:       certTTL,
-		tokenInterval: tokenInterval,
-		tokenTTL:      tokenTTL,
+		parentToken:   conf.ParentToken,
+		tokenPolicies: conf.TokenPolicies,
+		certType:      conf.CertType,
+		tokenType:     conf.TokenType,
+		uris:          conf.URIs,
+		dnss:          conf.DNSs,
+		ips:           conf.IPs,
+		certInterval:  time.Duration(conf.CertInterval),
+		certTTL:       time.Duration(conf.CertTTL),
+		tokenInterval: time.Duration(conf.TokenInterval),
+		tokenTTL:      time.Duration(conf.TokenTTL),
 		vaultCertPool: vaultCertPool,
 		done:          make(chan bool),
 		logger:        logger,
@@ -174,6 +205,36 @@ func (f *MiniVaultLoader) Run() error {
 	var tokenDone = make(chan bool)
 	var certDone = make(chan bool)
 
+	var parentToken *token.Token
+	var err error
+	if f.tokenTTL == 0 {
+		for {
+			parentToken, err = f.vaultClient.GetToken(f.parentToken)
+			if err == nil {
+				f.tokenTTL = parentToken.MaxTTL
+				if f.tokenInterval == 0 {
+					f.tokenInterval = f.tokenTTL * 2 / 3
+				}
+				if f.certTTL == 0 {
+					f.certTTL = f.tokenTTL / 10
+				}
+				if f.certInterval == 0 {
+					f.certInterval = f.certTTL * 2 / 3
+				}
+				break
+			} else {
+				f.logger.Error().Err(err).Msg("cannot get parent token")
+				f.logger.Info().Msg("get parent token sleeping 10s")
+				select {
+				case <-f.done:
+					return nil
+				case <-time.After(10 * time.Second):
+
+				}
+			}
+		}
+	}
+
 	for { // token retry loop
 		if token, err := f.loadToken(); err == nil {
 			f.setToken(token, false)
@@ -182,7 +243,7 @@ func (f *MiniVaultLoader) Run() error {
 			f.logger.Error().Err(err).Msg("cannot get token")
 			f.logger.Info().Msg("token sleeping 10s")
 			select {
-			case <-tokenDone:
+			case <-f.done:
 				return nil
 			case <-time.After(10 * time.Second):
 			}
@@ -196,7 +257,7 @@ func (f *MiniVaultLoader) Run() error {
 			f.logger.Error().Err(err).Msg("cannot get cert")
 			f.logger.Info().Msg("cert sleeping 10s")
 			select {
-			case <-certDone:
+			case <-f.done:
 				return nil
 			case <-time.After(10 * time.Second):
 			}

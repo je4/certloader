@@ -4,18 +4,44 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"emperror.dev/errors"
+	configtrust "github.com/je4/trustutil/v2/pkg/config"
+	configutil "github.com/je4/utils/v2/pkg/config"
 	"github.com/je4/utils/v2/pkg/zLogger"
 	"os"
 	"time"
 )
 
-func NewEnvLoader(certChannel chan *tls.Certificate, client bool, cert, key string, certPool *x509.CertPool, interval time.Duration, logger zLogger.ZLogger) (*EnvLoader, error) {
+type EnvConfig struct {
+	Cert          string                    `json:"cert,omitempty" toml:"cert"`
+	Key           string                    `json:"key,omitempty" toml:"key"`
+	Interval      configutil.Duration       `json:"interval,omitempty" toml:"interval"`
+	CA            []configtrust.Certificate `json:"ca,omitempty" toml:"ca"`
+	UseSystemPool bool                      `json:"usesystempool,omitempty" toml:"usesystempool"`
+}
+
+func NewEnvLoader(certChannel chan *tls.Certificate, conf *EnvConfig, logger zLogger.ZLogger) (*EnvLoader, error) {
+	if conf == nil {
+		return nil, errors.New("env config missing")
+	}
+	var certPool *x509.CertPool
+	var err error
+	if conf.UseSystemPool || len(conf.CA) == 0 {
+		certPool, err = x509.SystemCertPool()
+		if err != nil {
+			return nil, errors.Wrap(err, "cannot get system cert pool")
+		}
+	} else {
+		certPool = x509.NewCertPool()
+	}
+	for _, cert := range conf.CA {
+		certPool.AddCert(cert.Certificate)
+	}
 	l := &EnvLoader{
 		certChannel: certChannel,
-		cert:        cert,
-		key:         key,
+		cert:        conf.Cert,
+		key:         conf.Key,
 		caCertPool:  certPool,
-		interval:    interval,
+		interval:    time.Duration(conf.Interval),
 		done:        make(chan bool),
 		logger:      logger,
 	}
