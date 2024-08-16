@@ -1,12 +1,12 @@
 module github.com/je4/certloader/v2
 
-go 1.22.5
+go 1.23.0
 
 require (
 	emperror.dev/errors v0.8.1
-	github.com/je4/minivault/v2 v2.0.0
-	github.com/je4/trustutil/v2 v2.0.22
-	github.com/je4/utils/v2 v2.0.47
+	github.com/je4/minivault/v2 v2.0.1
+	github.com/je4/trustutil/v2 v2.0.24
+	github.com/je4/utils/v2 v2.0.50
 	github.com/smallstep/certinfo v1.12.2
 )
 
@@ -55,9 +55,9 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/arch v0.9.0 // indirect
 	golang.org/x/crypto v0.26.0 // indirect
-	golang.org/x/exp v0.0.0-20240719175910-8a7402abbf56 // indirect
+	golang.org/x/exp v0.0.0-20240808152545-0cdaa3abc0fa // indirect
 	golang.org/x/net v0.28.0 // indirect
-	golang.org/x/sys v0.23.0 // indirect
+	golang.org/x/sys v0.24.0 // indirect
 	golang.org/x/text v0.17.0 // indirect
 	golang.org/x/tools v0.24.0 // indirect
 	google.golang.org/protobuf v1.34.2 // indirect
