@@ -53,6 +53,10 @@ type devLoader struct {
 	logger      zLogger.ZLogger
 }
 
+func (d *devLoader) GetTLSConfig() (*tls.Config, error) {
+	return nil, noTLSConfig
+}
+
 func (d *devLoader) Close() error {
 	d.done <- true
 	close(d.done)

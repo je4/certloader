@@ -61,6 +61,10 @@ type EnvLoader struct {
 	caCertPool  *x509.CertPool
 }
 
+func (f *EnvLoader) GetTLSConfig() (*tls.Config, error) {
+	return nil, noTLSConfig
+}
+
 func (f *EnvLoader) GetCA() (*x509.CertPool, error) {
 	return f.caCertPool, nil
 }

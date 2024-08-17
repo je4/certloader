@@ -110,6 +110,10 @@ type MiniVaultLoader struct {
 	tokenTTL      time.Duration
 }
 
+func (f *MiniVaultLoader) GetTLSConfig() (*tls.Config, error) {
+	return nil, noTLSConfig
+}
+
 func (f *MiniVaultLoader) setToken(token string, parent bool) {
 	f.tokenMutex.Lock()
 	f.tokenMutex.Unlock()

@@ -61,6 +61,10 @@ type FileLoader struct {
 	logger      zLogger.ZLogger
 }
 
+func (f *FileLoader) GetTLSConfig() (*tls.Config, error) {
+	return nil, noTLSConfig
+}
+
 func (f *FileLoader) GetCA() (*x509.CertPool, error) {
 	return f.caCertPool, nil
 }

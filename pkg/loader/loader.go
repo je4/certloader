@@ -21,15 +21,19 @@ type Config struct {
 	File  *FileConfig      `json:"file,omitempty" toml:"file"`
 	Env   *EnvConfig       `json:"env,omitempty" toml:"env"`
 	Dev   *DevConfig       `json:"dev,omitempty" toml:"dev"`
+	ACME  *ACMEConfig      `json:"acme,omitempty" toml:"acme"`
 	//CA             []configtrust.Certificate `json:"ca,omitempty" toml:"ca"`
 	//UseSystemPool  bool                `json:"usesystempool,omitempty" toml:"usesystempool"`
 	InitialTimeout configutil.Duration `json:"initialtimeout,omitempty" toml:"initialtimeout"`
 }
 
+var noTLSConfig = errors.New("no tls config")
+
 type Loader interface {
 	io.Closer
 	Run() error
 	GetCA() (*x509.CertPool, error)
+	GetTLSConfig() (*tls.Config, error)
 }
 
 func initLoader(conf *Config, certChannel chan *tls.Certificate, client bool, logger zLogger.ZLogger) (l Loader, err error) {
@@ -40,6 +44,8 @@ func initLoader(conf *Config, certChannel chan *tls.Certificate, client bool, lo
 		l, err = NewFileLoader(certChannel, conf.File, logger)
 	case "DEV":
 		l, err = NewDevLoader(certChannel, client, conf.Dev, logger)
+	case "ACME":
+		l, err = NewACMELoader(certChannel, conf.ACME)
 	case "MINIVAULT":
 		l, err = NewMiniVaultLoader(
 			certChannel,
@@ -80,6 +86,13 @@ func CreateServerLoader(mutual bool, conf *Config, uris []string, logger zLogger
 	l, err = initLoader(conf, certChannel, false, logger)
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "cannot create loader")
+	}
+	if cert, err := l.GetTLSConfig(); err == nil {
+		return cert, l, nil
+	} else {
+		if !errors.Is(err, noTLSConfig) {
+			return nil, nil, errors.Wrap(err, "cannot get tls config")
+		}
 	}
 	var cert *tls.Certificate
 	select {
