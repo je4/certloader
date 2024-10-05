@@ -7,9 +7,10 @@ import (
 	"github.com/je4/trustutil/v2/pkg/tlsutil"
 	configutil "github.com/je4/utils/v2/pkg/config"
 	"github.com/je4/utils/v2/pkg/zLogger"
+	"github.com/rs/zerolog"
 	"github.com/smallstep/certinfo"
 	"io"
-	"log"
+	"os"
 	"strings"
 	"time"
 )
@@ -37,6 +38,10 @@ type Loader interface {
 }
 
 func initLoader(conf *Config, certChannel chan *tls.Certificate, client bool, logger zLogger.ZLogger) (l Loader, err error) {
+	if logger == nil {
+		l := zerolog.New(os.Stderr).With().Timestamp().Logger()
+		logger = &l
+	}
 	switch strings.ToUpper(conf.Type) {
 	case "ENV":
 		l, err = NewEnvLoader(certChannel, conf.Env, logger)
@@ -56,23 +61,11 @@ func initLoader(conf *Config, certChannel chan *tls.Certificate, client bool, lo
 		return
 	}
 	go func() {
-		if logger != nil {
-			logger.Info().Msg("starting loader")
-		} else {
-			log.Printf("starting loader\n")
-		}
+		logger.Info().Msg("starting loader")
 		if err := l.Run(); err != nil {
-			if logger != nil {
-				logger.Error().Err(err).Msg("error starting loader")
-			} else {
-				log.Printf("error starting loader: %v\n", err)
-			}
+			logger.Error().Err(err).Msg("error starting loader")
 		} else {
-			if logger != nil {
-				logger.Info().Msg("loader stopped")
-			} else {
-				log.Printf("loader stopped\n")
-			}
+			logger.Info().Msg("loader stopped")
 		}
 	}()
 	return
